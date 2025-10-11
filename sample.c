@@ -19,5 +19,7 @@ int main() {
             c = true;
         }
     }
+
+    while(1);
     return 0;
 }

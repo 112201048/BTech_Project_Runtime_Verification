@@ -1,4 +1,15 @@
-#include <bits/stdc++.h>
+#include <iostream>
+#include <iomanip>
+#include <string>
+#include <vector>
+#include <map>
+#include <regex>
+#include <stdexcept>
+#include <sstream>
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <unistd.h>
 #include "elfio/elfio.hpp"
 
 using namespace std;
@@ -33,6 +44,9 @@ vector<string> extract_required_symbols(const string ltl_formula){
     }
     return required_symbols;
 }
+
+// Pass the base address of the ELF file so that the addresses can be adjusted accordingly by adding the 
+// base address to the symbol address to get the runtime virtual memory address
 
 // Function to find addresses of required symbols from the symbol table in the ELF file
 map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<string>& required_symbols) {
@@ -110,9 +124,28 @@ int main(int argc, char* argv[]) {
 
     string elf_file = argv[1];
     string ltl_formula = argv[2];
+    
+    vector<string> required_symbols = extract_required_symbols(ltl_formula);
+    
+    // Using fork, create a child process which will have a ptrace traceme call followed by an execve call
+    // The child process will be traced by the parent process
+    // the child process will stop just after loading the ELF file in memory
+    // at this point the ELF file is loaded in memory and the symbols are resolved
+    // and the base address of the executable is known
+    // The child process pauses just before executing the first instruction
+    // parent was waiting for the child to stop using waitpid
+    // The parent process will then read the memory mappings of the child process
+    // from the /proc/<child_pid>/maps file
+    // and get the base address of the executable
+    // The parent process will then call the find_addresses function by passing the base address
+    // of the executable and the ELF file path and the list of required symbols to get the
+    // runtime virtual memory addresses of the symbols by adding the base address to the symbol address
+    // The parent process will then print the symbol information in a formatted table
+
+    
+    // pid_t child_pid = fork();
 
     try {
-        vector<string> required_symbols = extract_required_symbols(ltl_formula);
         map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols);
         print_symbol_info(symbol_map);
     } catch (const exception& e) {
