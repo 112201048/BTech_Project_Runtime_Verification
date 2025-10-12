@@ -10,6 +10,9 @@
 #include <cstdint>
 #include <memory>
 #include <unistd.h>
+#include <sys/ptrace.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include "elfio/elfio.hpp"
 
 using namespace std;
@@ -143,15 +146,41 @@ int main(int argc, char* argv[]) {
     // The parent process will then print the symbol information in a formatted table
 
     
-    // pid_t child_pid = fork();
+    pid_t pid = fork();
+    
+    if (pid == 0) {
+        // Child process
+        ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+        
+        // Stops execution.
+        raise(SIGSTOP);
 
-    try {
-        map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols);
-        print_symbol_info(symbol_map);
-    } catch (const exception& e) {
-        cerr << "Error: " << e.what() << endl;
+        const char* argv_exec[] = {elf_file.c_str(), nullptr};
+        const char* envp_exec[] = {nullptr};
+        execve(elf_file.c_str(), (char* const*) argv_exec, (char* const*)envp_exec);
+    } else if (pid > 0) {
+        // Parent process
+        try {
+            int status;
+            waitpid(pid, &status, 0);
+            if (WIFSTOPPED(status)) {
+                ptrace(PTRACE_PEEKDATA, pid, 0x00004000, NULL);
+                ptrace(PTRACE_CONT, pid, NULL, NULL);
+                waitpid(pid, &status, 0);
+
+            }
+
+            map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols);
+            print_symbol_info(symbol_map);
+        } catch (const exception& e) {
+            cerr << "Error: " << e.what() << endl;
+            return 1;
+        }
+    } else {
+        cerr << "Fork failed..." << strerror(errno) << endl;
         return 1;
     }
+
 
     return 0;
 }
