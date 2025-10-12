@@ -13,6 +13,7 @@
 #include <sys/ptrace.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <fstream>
 #include "elfio/elfio.hpp"
 
 using namespace std;
@@ -48,11 +49,8 @@ vector<string> extract_required_symbols(const string ltl_formula){
     return required_symbols;
 }
 
-// Pass the base address of the ELF file so that the addresses can be adjusted accordingly by adding the 
-// base address to the symbol address to get the runtime virtual memory address
-
-// Function to find addresses of required symbols from the symbol table in the ELF file
-map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<string>& required_symbols) {
+// Function to find addresses of required symbols from the symbol table in the ELF file and adjust them with base address
+map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<string>& required_symbols, uint64_t base_address) {
     ELFIO::elfio reader;
     // Load ELF data
     if (!reader.load(elf_file)) {
@@ -81,7 +79,9 @@ map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<stri
                 symbols.get_symbol(i, name, value, size, bind, type, section_index, other);
                 // if name is in required_symbols
                 if (find(required_symbols.begin(), required_symbols.end(), name) != required_symbols.end()) {
-                    SymbolInfo info = {value, size, (type == ELFIO::STT_FUNC) ? "function" : "object", reader.sections[section_index]->get_name()};
+                    // Add base_address to value to get runtime virtual memory address
+                    uint64_t runtime_addr = value + base_address;
+                    SymbolInfo info = {runtime_addr, size, (type == ELFIO::STT_FUNC) ? "function" : "object", reader.sections[section_index]->get_name()};
                     symbol_map[name] = info;
                 }
             }
@@ -145,16 +145,11 @@ int main(int argc, char* argv[]) {
     // runtime virtual memory addresses of the symbols by adding the base address to the symbol address
     // The parent process will then print the symbol information in a formatted table
 
-    
     pid_t pid = fork();
     
     if (pid == 0) {
         // Child process
         ptrace(PTRACE_TRACEME, 0, NULL, NULL);
-        
-        // Stops execution.
-        raise(SIGSTOP);
-
         const char* argv_exec[] = {elf_file.c_str(), nullptr};
         const char* envp_exec[] = {nullptr};
         execve(elf_file.c_str(), (char* const*) argv_exec, (char* const*)envp_exec);
@@ -163,15 +158,30 @@ int main(int argc, char* argv[]) {
         try {
             int status;
             waitpid(pid, &status, 0);
-            if (WIFSTOPPED(status)) {
-                ptrace(PTRACE_PEEKDATA, pid, 0x00004000, NULL);
+            uint64_t base_address;
+            if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGTRAP) {
+                string map_path = "/proc/" + to_string(pid) + "/maps";
+                ifstream maps_file(map_path);
+                if (!maps_file.is_open()) {
+                    throw runtime_error("Could not open maps file: " + map_path);
+                }
+                string line;
+                if (getline(maps_file, line)){
+                    stringstream ss(line);
+                    string address_range;
+                    ss >> address_range;
+                    size_t dash_pos = address_range.find('-');
+                    string base_str = address_range.substr(0, dash_pos);
+                    base_address = stoull(base_str, nullptr, 16);
+                    cout << "Base address of the executable: 0x" << hex << base_address << dec << endl;
+                }
+                map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols, base_address);
+                print_symbol_info(symbol_map);
+                cout << "pid of the child process: " << pid << endl;
+                cout << "Press Enter to continue execution of the child process..." << endl;
+                cin.get();
                 ptrace(PTRACE_CONT, pid, NULL, NULL);
-                waitpid(pid, &status, 0);
-
             }
-
-            map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols);
-            print_symbol_info(symbol_map);
         } catch (const exception& e) {
             cerr << "Error: " << e.what() << endl;
             return 1;
