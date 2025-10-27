@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <fstream>
+#include <sys/prctl.h> 
 #include "elfio/elfio.hpp"
 
 using namespace std;
@@ -97,6 +98,17 @@ map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<stri
     return symbol_map;
 }
 
+/// @brief Function to add the offset of base_address to the value in the symbol map
+/// @param symbol_map 
+/// @param base_address 
+/// @return updated symbol_map
+map<string, SymbolInfo> update_with_base_address(map<string, SymbolInfo>& symbol_map ,uint64_t base_address) {
+    for (auto& i: symbol_map) {
+        i.second.address += base_address;
+    }
+    return symbol_map;
+}
+
 // Function to print the symbol information in a formatted table
 void print_symbol_info(const map<string, SymbolInfo>& symbol_map) {
     cout << left << setw(20) << "Symbol" 
@@ -129,7 +141,13 @@ int main(int argc, char* argv[]) {
     string ltl_formula = argv[2];
     
     vector<string> required_symbols = extract_required_symbols(ltl_formula);
-    
+
+    // Find addresses without making adjustments with the base address
+    map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols, uint64_t(0));
+
+    // Printing the symbol table before offset
+    // print_symbol_info(symbol_map);
+
     // Using fork, create a child process which will have a ptrace traceme call followed by an execve call
     // The child process will be traced by the parent process
     // the child process will stop just after loading the ELF file in memory
@@ -148,23 +166,37 @@ int main(int argc, char* argv[]) {
     pid_t pid = fork();
     
     if (pid == 0) {
+
+        // Signals when the parent dies
+        prctl(PR_SET_PDEATHSIG, SIGTERM);
+
         // Child process
         ptrace(PTRACE_TRACEME, 0, NULL, NULL);
+
         const char* argv_exec[] = {elf_file.c_str(), nullptr};
         const char* envp_exec[] = {nullptr};
+
         execve(elf_file.c_str(), (char* const*) argv_exec, (char* const*)envp_exec);
+        perror("execve failed...\n");
+        _exit(errno);
+
     } else if (pid > 0) {
+
         // Parent process
         try {
+
             int status;
             waitpid(pid, &status, 0);
             uint64_t base_address;
+
             if (WIFSTOPPED(status) && WSTOPSIG(status) == SIGTRAP) {
                 string map_path = "/proc/" + to_string(pid) + "/maps";
                 ifstream maps_file(map_path);
+
                 if (!maps_file.is_open()) {
                     throw runtime_error("Could not open maps file: " + map_path);
                 }
+
                 string line;
                 if (getline(maps_file, line)){
                     stringstream ss(line);
@@ -175,20 +207,31 @@ int main(int argc, char* argv[]) {
                     base_address = stoull(base_str, nullptr, 16);
                     cout << "Base address of the executable: 0x" << hex << base_address << dec << endl;
                 }
-                map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols, base_address);
+                
+                // Update the symbol table with runtime addresses
+                symbol_map = update_with_base_address(symbol_map, base_address);
                 print_symbol_info(symbol_map);
+
                 cout << "pid of the child process: " << pid << endl;
                 cout << "Press Enter to continue execution of the child process..." << endl;
                 cin.get();
+
                 ptrace(PTRACE_CONT, pid, NULL, NULL);
+                
+                // Parent waits for the child to finish
+                waitpid(pid, &status, 0);
             }
         } catch (const exception& e) {
+
             cerr << "Error: " << e.what() << endl;
             return 1;
+
         }
     } else {
+
         cerr << "Fork failed..." << strerror(errno) << endl;
         return 1;
+
     }
 
 

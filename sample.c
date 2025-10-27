@@ -13,6 +13,8 @@ void init_system() {
 int main() {
     init_system();
 
+    printf("Started sampling ...\n");
+
     for (int i = 0; i < 5; i++) {
         b += i * 10;
         if (b > 150) {
