@@ -51,7 +51,7 @@ vector<string> extract_required_symbols(const string ltl_formula){
 }
 
 // Function to find addresses of required symbols from the symbol table in the ELF file and adjust them with base address
-map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<string>& required_symbols, uint64_t base_address) {
+map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<string>& required_symbols) {
     ELFIO::elfio reader;
     // Load ELF data
     if (!reader.load(elf_file)) {
@@ -81,8 +81,7 @@ map<string, SymbolInfo> find_addresses(const string& elf_file, const vector<stri
                 // if name is in required_symbols
                 if (find(required_symbols.begin(), required_symbols.end(), name) != required_symbols.end()) {
                     // Add base_address to value to get runtime virtual memory address
-                    uint64_t runtime_addr = value + base_address;
-                    SymbolInfo info = {runtime_addr, size, (type == ELFIO::STT_FUNC) ? "function" : "object", reader.sections[section_index]->get_name()};
+                    SymbolInfo info = {value, size, (type == ELFIO::STT_FUNC) ? "function" : "object", reader.sections[section_index]->get_name()};
                     symbol_map[name] = info;
                 }
             }
@@ -143,7 +142,7 @@ int main(int argc, char* argv[]) {
     vector<string> required_symbols = extract_required_symbols(ltl_formula);
 
     // Find addresses without making adjustments with the base address
-    map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols, uint64_t(0));
+    map<string, SymbolInfo> symbol_map = find_addresses(elf_file, required_symbols);
 
     // Printing the symbol table before offset
     // print_symbol_info(symbol_map);
@@ -233,7 +232,6 @@ int main(int argc, char* argv[]) {
         return 1;
 
     }
-
 
     return 0;
 }

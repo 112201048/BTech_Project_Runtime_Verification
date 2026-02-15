@@ -11,7 +11,13 @@ void init_system() {
 }
 
 int main() {
+    int abc = 0;
     init_system();
+    printf("Address of a: %p\n", (void*)&a);
+    printf("Address of b: %p\n", (void*)&b);
+    printf("Address of c: %p\n", (void*)&c);
+    int abcd = 0;
+
 
     printf("Started sampling ...\n");
 
@@ -22,6 +28,5 @@ int main() {
         }
     }
 
-    while(1);
     return 0;
 }

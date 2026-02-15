@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# Simple QEMU boot script for ARM Cortex-A9 (vexpress)
+
+KERNEL="../../vmlinuz-3.2.0-4-vexpress"
+INITRD="../../initrd.img-3.2.0-4-vexpress"
+DISK="../../debian_wheezy_armhf_standard.qcow2"
+
+if [ ! -f "$KERNEL" ]; then
+    echo "Error: Kernel image $KERNEL not found"
+    exit 1
+fi
+
+if [ ! -f "$INITRD" ]; then
+    echo "Error: Initrd image $INITRD not found"
+    exit 1
+fi
+
+if [ ! -f "$DISK" ]; then
+    echo "Error: Disk image $DISK not found"
+    exit 1
+fi
+
+echo "Starting QEMU ARM Cortex-A9..."
+
+qemu-system-arm \
+  -M vexpress-a9 \
+  -m 1024 \
+  -kernel "$KERNEL" \
+  -initrd "$INITRD" \
+  -drive file="$DISK",if=sd,format=qcow2 \
+  -append "root=/dev/mmcblk0p2 console=ttyAMA0" \
+  -nographic \
+  -plugin ../plugin/rv_watch.so,/home/sidarthp/vexpress-a9/rv_auto/shared/watchlist.txt=on \
+  -net nic -net user,hostfwd=tcp::2222-:22
+
